@@ -17,6 +17,10 @@ import {
   ChatRequestSchema,
   GeneratePlanRequestSchema,
   CelebrationIntelligenceRequestSchema,
+  ReplanningRequestSchema,
+  RiskMitigationRequestSchema,
+  VendorNegotiationRequestSchema,
+  OperationsRequestSchema,
   getGeminiModelName,
   getGeminiFallbackModelName,
 } from './server/geminiService';
@@ -35,12 +39,30 @@ const isProduction = process.env.NODE_ENV === 'production';
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
-// Simple in-memory rate limiting map (IP -> timestamp array)
+// Bounded, expiring in-memory rate limiter for /api/* endpoints
 const rateLimitWindowMs = 60 * 1000; // 1 minute
 const maxRequestsPerWindow = 60;
+const maxTrackedIps = 10000;
 const ipRequestHistory = new Map<string, number[]>();
 
-app.use((req, res, next) => {
+// Periodic cleanup interval to prevent memory growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, timestamps] of ipRequestHistory.entries()) {
+    const recent = timestamps.filter((t) => now - t < rateLimitWindowMs);
+    if (recent.length === 0) {
+      ipRequestHistory.delete(ip);
+    } else {
+      ipRequestHistory.set(ip, recent);
+    }
+  }
+  if (ipRequestHistory.size > maxTrackedIps) {
+    const keysToRemove = Array.from(ipRequestHistory.keys()).slice(0, ipRequestHistory.size - maxTrackedIps);
+    keysToRemove.forEach((k) => ipRequestHistory.delete(k));
+  }
+}, 5 * 60 * 1000);
+
+app.use('/api', (req, res, next) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   const now = Date.now();
   const timestamps = ipRequestHistory.get(ip) || [];
@@ -57,7 +79,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health & Environment Diagnostics Endpoint
+// Health & Environment Diagnostics Endpoint (Restricted to non-sensitive diagnostic info)
 app.get('/api/health', (req: Request, res: Response) => {
   const apiKeyConfigured = Boolean(
     process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY'
@@ -66,7 +88,7 @@ app.get('/api/health', (req: Request, res: Response) => {
   res.json({
     status: 'healthy',
     application: 'CelebrationAI – Event Intelligence Copilot',
-    release: 'CAI-002',
+    release: 'CAI-006.1',
     geminiModel: getGeminiModelName(),
     geminiFallbackModel: getGeminiFallbackModelName(),
     apiKeyConfigured,
@@ -90,7 +112,7 @@ app.post('/api/copilot/chat', async (req: Request, res: Response) => {
     const response = await handleCopilotChat(messages, currentEvent);
     res.json(response);
   } catch (error: any) {
-    console.error('API /copilot/chat error:', error);
+    console.error('API /copilot/chat error:', error?.message || 'Unknown error');
     res.status(500).json({
       error: 'An internal error occurred while processing the planning request.',
     });
@@ -111,7 +133,7 @@ app.post('/api/copilot/generate-plan', async (req: Request, res: Response) => {
     const plan = await handleGeneratePlan(parseResult.data);
     res.json(plan);
   } catch (error: any) {
-    console.error('API /copilot/generate-plan error:', error);
+    console.error('API /copilot/generate-plan error:', error?.message || 'Unknown error');
     res.status(500).json({
       error: 'Failed to generate event plan. Please check inputs and try again.',
     });
@@ -121,15 +143,19 @@ app.post('/api/copilot/generate-plan', async (req: Request, res: Response) => {
 // Dynamic Intelligent Replanning
 app.post('/api/copilot/replan', async (req: Request, res: Response) => {
   try {
-    const { currentPlan, request } = req.body;
-    if (!currentPlan || !request) {
-      return res.status(400).json({ error: 'currentPlan and replanning request are required.' });
+    const parseResult = ReplanningRequestSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return res.status(400).json({
+        error: 'Invalid replanning parameters',
+        details: parseResult.error.flatten(),
+      });
     }
 
-    const impact = generateDynamicReplanning(currentPlan, request);
+    const { currentPlan, request } = parseResult.data;
+    const impact = generateDynamicReplanning(currentPlan as any, request as any);
     res.json(impact);
   } catch (error: any) {
-    console.error('API /copilot/replan error:', error);
+    console.error('API /copilot/replan error:', error?.message || 'Unknown error');
     res.status(500).json({
       error: 'Replanning engine failed to process the change request.',
     });
@@ -139,18 +165,22 @@ app.post('/api/copilot/replan', async (req: Request, res: Response) => {
 // AI Risk Mitigation Briefing
 app.post('/api/copilot/risk-mitigation', async (req: Request, res: Response) => {
   try {
-    const { risk, planContext } = req.body;
-    if (!risk) {
-      return res.status(400).json({ error: 'Risk object is required.' });
+    const parseResult = RiskMitigationRequestSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return res.status(400).json({
+        error: 'Invalid risk mitigation parameters',
+        details: parseResult.error.flatten(),
+      });
     }
 
+    const { risk, planContext } = parseResult.data;
     const strategy = await handleRiskMitigation(
-      risk,
+      risk as any,
       planContext || { name: 'Event', type: 'General', budget: 1000000, currency: 'INR' }
     );
     res.json(strategy);
   } catch (error: any) {
-    console.error('API /copilot/risk-mitigation error:', error);
+    console.error('API /copilot/risk-mitigation error:', error?.message || 'Unknown error');
     res.status(500).json({
       error: 'Failed to generate mitigation strategy.',
     });
@@ -172,7 +202,7 @@ app.post('/api/copilot/celebration-intelligence', async (req: Request, res: Resp
     const report = await handleCelebrationIntelligence(currentPlan, request);
     res.json(report);
   } catch (error: any) {
-    console.error('API /copilot/celebration-intelligence error:', error);
+    console.error('API /copilot/celebration-intelligence error:', error?.message || 'Unknown error');
     res.status(500).json({
       error: 'Celebration Intelligence Engine encountered an unexpected calculation error.',
     });
@@ -182,15 +212,19 @@ app.post('/api/copilot/celebration-intelligence', async (req: Request, res: Resp
 // Vendor Procurement Negotiation Copilot (CAI-004)
 app.post('/api/copilot/vendor-negotiation', async (req: Request, res: Response) => {
   try {
-    const { quotation, allocatedBudget } = req.body;
-    if (!quotation || !quotation.vendorName) {
-      return res.status(400).json({ error: 'Quotation object is required.' });
+    const parseResult = VendorNegotiationRequestSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return res.status(400).json({
+        error: 'Invalid vendor negotiation parameters',
+        details: parseResult.error.flatten(),
+      });
     }
 
-    const insight = await handleVendorNegotiationCopilot(quotation, allocatedBudget || 450000);
+    const { quotation, allocatedBudget } = parseResult.data;
+    const insight = await handleVendorNegotiationCopilot(quotation as any, allocatedBudget || 450000);
     res.json(insight);
   } catch (error: any) {
-    console.error('API /copilot/vendor-negotiation error:', error);
+    console.error('API /copilot/vendor-negotiation error:', error?.message || 'Unknown error');
     res.status(500).json({
       error: 'Vendor Negotiation Copilot failed to process quotation data.',
     });
@@ -200,15 +234,19 @@ app.post('/api/copilot/vendor-negotiation', async (req: Request, res: Response) 
 // Event Operations Copilot (CAI-005)
 app.post('/api/copilot/operations', async (req: Request, res: Response) => {
   try {
-    const { event } = req.body;
-    if (!event) {
-      return res.status(400).json({ error: 'Event object is required.' });
+    const parseResult = OperationsRequestSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return res.status(400).json({
+        error: 'Invalid operations parameters',
+        details: parseResult.error.flatten(),
+      });
     }
 
-    const insight = await handleOperationsCopilot(event);
+    const { event } = parseResult.data;
+    const insight = await handleOperationsCopilot(event as any);
     res.json(insight);
   } catch (error: any) {
-    console.error('API /copilot/operations error:', error);
+    console.error('API /copilot/operations error:', error?.message || 'Unknown error');
     res.status(500).json({
       error: 'Event Operations Copilot failed to process operations analysis.',
     });
@@ -238,6 +276,6 @@ async function startServer() {
 }
 
 startServer().catch((err) => {
-  console.error('Failed to start server:', err);
+  console.error('Failed to start server:', err?.message || 'Unknown error');
   process.exit(1);
 });

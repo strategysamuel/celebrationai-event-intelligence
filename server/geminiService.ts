@@ -240,6 +240,49 @@ export const CelebrationIntelligenceRequestSchema = z.object({
   }),
 });
 
+export const ReplanningRequestSchema = z.object({
+  currentPlan: z.object({
+    id: z.string(),
+    name: z.string(),
+    totalBudget: z.number(),
+    guestCount: z.number(),
+  }).passthrough(),
+  request: z.object({
+    newBudget: z.number().optional(),
+    newDate: z.string().optional(),
+    newGuestCount: z.number().optional(),
+  }).passthrough(),
+});
+
+export const RiskMitigationRequestSchema = z.object({
+  risk: z.object({
+    id: z.string(),
+    title: z.string(),
+    severity: z.string(),
+  }).passthrough(),
+  planContext: z.object({
+    name: z.string(),
+    type: z.string(),
+    budget: z.number(),
+    currency: z.string(),
+  }).optional(),
+});
+
+export const VendorNegotiationRequestSchema = z.object({
+  quotation: z.object({
+    vendorName: z.string(),
+    quotedAmount: z.number().optional(),
+  }).passthrough(),
+  allocatedBudget: z.number().optional(),
+});
+
+export const OperationsRequestSchema = z.object({
+  event: z.object({
+    id: z.string(),
+    name: z.string(),
+  }).passthrough(),
+});
+
 // System Instructions
 const COPILOT_SYSTEM_INSTRUCTION = `You are CelebrationAI, an elite Principal Event Intelligence Copilot and Executive Wedding/Event Planner.
 Your purpose is to help users organize weddings, birthdays, anniversaries, corporate and community events.
@@ -350,7 +393,11 @@ Return response in strict JSON format matching this structure:
       fallbackType: routingResult.fallbackType,
     };
   } catch (err: any) {
-    console.error('Gemini Copilot chat error, falling back to deterministic heuristic:', err.message);
+    if (err.message?.includes('429') || err.message?.includes('RESOURCE_EXHAUSTED')) {
+      console.warn('Gemini quota exceeded (429). Falling back to deterministic heuristic engine.');
+    } else {
+      console.error('Gemini Copilot chat error, falling back to deterministic heuristic:', err.message);
+    }
     return generateHeuristicChatResponse(messages, currentEvent, selectedModel);
   }
 }
@@ -463,7 +510,11 @@ Return strictly JSON matching this structure:
     };
     return plan;
   } catch (err: any) {
-    console.error('Gemini plan generation error, falling back to heuristic engine:', err.message);
+    if (err.message?.includes('429') || err.message?.includes('RESOURCE_EXHAUSTED')) {
+      console.warn('Gemini quota exceeded (429). Falling back to heuristic engine.');
+    } else {
+      console.error('Gemini plan generation error, falling back to heuristic engine:', err.message);
+    }
     return generateHeuristicEventPlan(params, selectedModel);
   }
 }

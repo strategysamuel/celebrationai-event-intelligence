@@ -10,11 +10,13 @@ interface UseAccessibleModalProps {
  * - Focus trapping (Tab / Shift+Tab cycle within modal)
  * - Escape key dismissal
  * - Focus restoration to trigger element on close
- * - Initial focus on first interactive element
+ * - Initial focus on first interactive element (run ONCE on open, avoiding re-focus during typing)
  */
 export function useAccessibleModal({ isOpen, onClose }: UseAccessibleModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (isOpen) {
@@ -36,7 +38,7 @@ export function useAccessibleModal({ isOpen, onClose }: UseAccessibleModalProps)
       const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === 'Escape') {
           e.preventDefault();
-          onClose();
+          onCloseRef.current();
           return;
         }
 
@@ -76,7 +78,7 @@ export function useAccessibleModal({ isOpen, onClose }: UseAccessibleModalProps)
         }
       };
     }
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   return modalRef;
 }
