@@ -7,7 +7,7 @@
  * Risk Intelligence, and Controlled Replanning Approval Workflow.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Brain,
   Users,
@@ -65,13 +65,34 @@ export const CelebrationIntelligenceView: React.FC<CelebrationIntelligenceViewPr
   const [showApprovalModal, setShowApprovalModal] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'impact' | 'alternatives' | 'vendors' | 'timeline' | 'risks'>('impact');
 
-  // Sync inputs when active event changes
+  const lastAnalyzedRef = useRef({ guests: 0, budget: 0, date: '', prioritiesKey: '' });
+
+  // Sync inputs when active event changes with strict clamping
   useEffect(() => {
-    setGuestCountInput(activeEvent.guestCount || 300);
-    setBudgetInput(activeEvent.totalBudget || 1500000);
+    setGuestCountInput(Math.max(100, Math.min(1000, activeEvent.guestCount || 300)));
+    setBudgetInput(Math.max(500000, Math.min(5000000, activeEvent.totalBudget || 1500000)));
     setEventDateInput(activeEvent.eventDate || '2027-02-15');
-    runAnalysis(activeEvent.guestCount || 300, activeEvent.totalBudget || 1500000, activeEvent.eventDate || '2027-02-15', ['Catering', 'Photography']);
   }, [activeEvent.id]);
+
+  // Debounced execution of analysis only when inputs actually change
+  useEffect(() => {
+    const prioritiesKey = [...preservedPriorities].sort().join(',');
+    if (
+      lastAnalyzedRef.current.guests === guestCountInput &&
+      lastAnalyzedRef.current.budget === budgetInput &&
+      lastAnalyzedRef.current.date === eventDateInput &&
+      lastAnalyzedRef.current.prioritiesKey === prioritiesKey
+    ) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      lastAnalyzedRef.current = { guests: guestCountInput, budget: budgetInput, date: eventDateInput, prioritiesKey };
+      runAnalysis(guestCountInput, budgetInput, eventDateInput, preservedPriorities);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [guestCountInput, budgetInput, eventDateInput, preservedPriorities]);
 
   // Run Engine Analysis
   const runAnalysis = async (
@@ -90,7 +111,6 @@ export const CelebrationIntelligenceView: React.FC<CelebrationIntelligenceViewPr
     };
 
     try {
-      // Server call returns Gemini enriched report (or fallback)
       const resReport = await apiClient.analyzeCelebrationIntelligence(activeEvent, req);
       setReport(resReport);
     } catch (err) {
@@ -104,17 +124,10 @@ export const CelebrationIntelligenceView: React.FC<CelebrationIntelligenceViewPr
 
   // Quick Action: Signature Benchmark (300 -> 450 guests @ 15L)
   const handleLoadSignatureBenchmark = () => {
-    const guests = 450;
-    const budget = 1500000;
-    const date = '2027-02-15';
-    const priorities = ['Catering', 'Photography'];
-
-    setGuestCountInput(guests);
-    setBudgetInput(budget);
-    setEventDateInput(date);
-    setPreservedPriorities(priorities);
-
-    runAnalysis(guests, budget, date, priorities);
+    setGuestCountInput(450);
+    setBudgetInput(1500000);
+    setEventDateInput('2027-02-15');
+    setPreservedPriorities(['Catering', 'Photography']);
   };
 
   // Priority Toggle
@@ -123,7 +136,6 @@ export const CelebrationIntelligenceView: React.FC<CelebrationIntelligenceViewPr
       ? preservedPriorities.filter((p) => p !== category)
       : [...preservedPriorities, category];
     setPreservedPriorities(updated);
-    runAnalysis(guestCountInput, budgetInput, eventDateInput, updated);
   };
 
   // Selected Alternative
@@ -228,36 +240,26 @@ export const CelebrationIntelligenceView: React.FC<CelebrationIntelligenceViewPr
               step="25"
               value={guestCountInput}
               onChange={(e) => {
-                const val = parseInt(e.target.value, 10);
+                const val = Math.max(100, Math.min(1000, parseInt(e.target.value, 10) || 300));
                 setGuestCountInput(val);
-                runAnalysis(val, budgetInput, eventDateInput, preservedPriorities);
               }}
               className="w-full accent-blue-600 h-2 bg-slate-100 rounded-lg cursor-pointer"
             />
             <div className="flex justify-between text-[11px] text-slate-400">
               <button
-                onClick={() => {
-                  setGuestCountInput(300);
-                  runAnalysis(300, budgetInput, eventDateInput, preservedPriorities);
-                }}
+                onClick={() => setGuestCountInput(300)}
                 className="hover:text-blue-600 cursor-pointer"
               >
                 300 (Original)
               </button>
               <button
-                onClick={() => {
-                  setGuestCountInput(450);
-                  runAnalysis(450, budgetInput, eventDateInput, preservedPriorities);
-                }}
+                onClick={() => setGuestCountInput(450)}
                 className="text-teal-600 font-bold cursor-pointer"
               >
                 450 (Benchmark)
               </button>
               <button
-                onClick={() => {
-                  setGuestCountInput(600);
-                  runAnalysis(600, budgetInput, eventDateInput, preservedPriorities);
-                }}
+                onClick={() => setGuestCountInput(600)}
                 className="hover:text-blue-600 cursor-pointer"
               >
                 600
@@ -280,27 +282,20 @@ export const CelebrationIntelligenceView: React.FC<CelebrationIntelligenceViewPr
               step="50000"
               value={budgetInput}
               onChange={(e) => {
-                const val = parseInt(e.target.value, 10);
+                const val = Math.max(500000, Math.min(5000000, parseInt(e.target.value, 10) || 1500000));
                 setBudgetInput(val);
-                runAnalysis(guestCountInput, val, eventDateInput, preservedPriorities);
               }}
               className="w-full accent-emerald-600 h-2 bg-slate-100 rounded-lg cursor-pointer"
             />
             <div className="flex justify-between text-[11px] text-slate-400">
               <button
-                onClick={() => {
-                  setBudgetInput(1500000);
-                  runAnalysis(guestCountInput, 1500000, eventDateInput, preservedPriorities);
-                }}
+                onClick={() => setBudgetInput(1500000)}
                 className="text-emerald-700 font-bold cursor-pointer"
               >
                 ₹15 Lakhs (Ceiling)
               </button>
               <button
-                onClick={() => {
-                  setBudgetInput(1875000);
-                  runAnalysis(guestCountInput, 1875000, eventDateInput, preservedPriorities);
-                }}
+                onClick={() => setBudgetInput(1875000)}
                 className="hover:text-emerald-600 cursor-pointer"
               >
                 ₹18.75 Lakhs
@@ -316,10 +311,7 @@ export const CelebrationIntelligenceView: React.FC<CelebrationIntelligenceViewPr
             <input
               type="date"
               value={eventDateInput}
-              onChange={(e) => {
-                setEventDateInput(e.target.value);
-                runAnalysis(guestCountInput, budgetInput, e.target.value, preservedPriorities);
-              }}
+              onChange={(e) => setEventDateInput(e.target.value)}
               className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <p className="text-[10px] text-slate-400">Date changes require explicit confirmation.</p>

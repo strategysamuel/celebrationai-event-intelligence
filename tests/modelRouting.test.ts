@@ -7,6 +7,8 @@ import {
   setAiClientForTesting,
   getGeminiModelName,
   getGeminiFallbackModelName,
+  getQuotaCircuitBreakerStatus,
+  resetQuotaCircuitBreakerForTesting,
 } from '../server/geminiService';
 import { getModelAttributionBadge } from '../src/components/views/CopilotView';
 import { RiskAlert } from '../src/types/index.ts';
@@ -17,8 +19,9 @@ describe('CAI-002.2.1 Model Attribution Edge-Case Hardening', () => {
   });
 
   afterEach(() => {
-    // Reset AI client
+    // Reset AI client and circuit breaker
     setAiClientForTesting(undefined);
+    resetQuotaCircuitBreakerForTesting();
   });
 
   it('1. Confirms default configured primary and fallback model names', () => {
@@ -389,5 +392,60 @@ describe('CAI-002.2.1 Model Attribution Edge-Case Hardening', () => {
       expect(badge.label).not.toContain('undefined');
       expect(badge.label).not.toContain('null');
     });
+  });
+});
+
+describe('Gemini Quota Circuit Breaker (CAI-006.2)', () => {
+  beforeEach(() => {
+    resetQuotaCircuitBreakerForTesting();
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    resetQuotaCircuitBreakerForTesting();
+    setAiClientForTesting(undefined);
+  });
+
+  it('trips circuit breaker upon encountering daily quota exhaustion 429 error', async () => {
+    const mockGenerateContent = vi.fn().mockRejectedValue(
+      new Error('Generate content requests per day limit exceeded on Free Tier. Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests')
+    );
+
+    setAiClientForTesting({
+      models: {
+        generateContent: mockGenerateContent,
+      },
+    });
+
+    const statusBefore = getQuotaCircuitBreakerStatus();
+    expect(statusBefore.isOpen).toBe(false);
+
+    const res = await handleCopilotChat([{ role: 'user', content: 'Test daily quota trip' }]);
+    expect(res.source).toBe('heuristic');
+
+    const statusAfter = getQuotaCircuitBreakerStatus();
+    expect(statusAfter.isOpen).toBe(true);
+  });
+
+  it('subsequent requests while circuit breaker is open bypass Gemini calls and use heuristic fallback', async () => {
+    const mockGenerateContent = vi.fn().mockRejectedValue(
+      new Error('Generate content requests per day limit exceeded on Free Tier')
+    );
+
+    setAiClientForTesting({
+      models: {
+        generateContent: mockGenerateContent,
+      },
+    });
+
+    await handleCopilotChat([{ role: 'user', content: 'Trip breaker' }]);
+    expect(mockGenerateContent).toHaveBeenCalled();
+
+    const callCountAfterFirst = mockGenerateContent.mock.calls.length;
+
+    const res2 = await handleCopilotChat([{ role: 'user', content: 'Second request during open circuit' }]);
+    expect(res2.source).toBe('heuristic');
+
+    expect(mockGenerateContent.mock.calls.length).toBe(callCountAfterFirst);
   });
 });

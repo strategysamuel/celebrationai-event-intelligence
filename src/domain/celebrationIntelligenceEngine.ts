@@ -69,11 +69,12 @@ export function analyzeCelebrationIntelligence(
   const newRisksIdentified = generateIntelligenceRisks(currentPlan, newGuestCount, newBudget, budgetSummary.budgetShortfallOrSurplus);
 
   // Attach risks to revised plan (ensuring no duplicates)
-  const existingRiskTitles = new Set(revisedPlan.risks.map((r) => r.title.toLowerCase()));
+  const existingRiskTitles = new Set(revisedPlan.risks.map((r) => String(r?.title || '').toLowerCase()));
   newRisksIdentified.forEach((risk) => {
-    if (!existingRiskTitles.has(risk.title.toLowerCase())) {
+    const riskTitleKey = String(risk?.title || '').toLowerCase();
+    if (!existingRiskTitles.has(riskTitleKey)) {
       revisedPlan.risks.push(risk);
-      existingRiskTitles.add(risk.title.toLowerCase());
+      existingRiskTitles.add(riskTitleKey);
     }
   });
 

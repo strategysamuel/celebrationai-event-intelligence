@@ -50,13 +50,14 @@ export function evaluateEventRisks(plan: EventPlan): RiskAlert[] {
 
     if (alloc.allocatedAmount > 0 && catExpenses > alloc.allocatedAmount * 1.25) {
       const overBy = catExpenses - alloc.allocatedAmount;
+      const categoryStr = String(alloc?.category || 'general');
       risks.push({
-        id: `risk-cat-overrun-${alloc.category.toLowerCase()}`,
+        id: `risk-cat-overrun-${categoryStr.toLowerCase()}`,
         category: 'Budget',
         severity: 'High',
-        title: `Category Budget Exceeded: ${alloc.category}`,
-        explanation: `${alloc.category} commitments (${plan.currency} ${catExpenses.toLocaleString()}) exceed the allocated allowance (${plan.currency} ${alloc.allocatedAmount.toLocaleString()}) by ${plan.currency} ${overBy.toLocaleString()} (>125%).`,
-        recommendedAction: `Renegotiate ${alloc.category.toLowerCase()} contract scope, compare alternative secondary vendors, or transfer surplus from under-utilized categories.`,
+        title: `Category Budget Exceeded: ${categoryStr}`,
+        explanation: `${categoryStr} commitments (${plan.currency} ${catExpenses.toLocaleString()}) exceed the allocated allowance (${plan.currency} ${alloc.allocatedAmount.toLocaleString()}) by ${plan.currency} ${overBy.toLocaleString()} (>125%).`,
+        recommendedAction: `Renegotiate ${categoryStr.toLowerCase()} contract scope, compare alternative secondary vendors, or transfer surplus from under-utilized categories.`,
         status: 'Open',
         detectedAt: todayStr,
         source: 'Rule Engine',

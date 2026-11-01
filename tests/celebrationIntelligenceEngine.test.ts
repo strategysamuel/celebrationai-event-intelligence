@@ -503,4 +503,46 @@ describe('CAI-003 Celebration Intelligence Engine Verification', () => {
     // Active event object must remain 100% identical
     expect(mockBaselineEvent).toEqual(originalCopy);
   });
+
+  it('23. Handles malformed narrative and null/numeric/object risk titles gracefully without throwing TypeError', async () => {
+    const eventWithWeirdRisks = JSON.parse(JSON.stringify(mockBaselineEvent));
+    eventWithWeirdRisks.risks = [
+      { id: 'r-1', title: null as any },
+      { id: 'r-2', title: 12345 as any },
+      { id: 'r-3', title: { name: 'object title' } as any },
+    ];
+
+    const req: CelebrationIntelligenceRequest = {
+      eventId: eventWithWeirdRisks.id,
+      newGuestCount: 400,
+      newBudget: 1500000,
+    };
+
+    const report = analyzeCelebrationIntelligence(eventWithWeirdRisks, req);
+    expect(report).toBeDefined();
+    expect(report.impactParameters.length).toBe(10);
+  });
+
+  it('24. Handles Gemini narrative enrichment failure with quota 429 gracefully and falls back to deterministic narrative', async () => {
+    const mockGenerateContent = vi.fn().mockRejectedValue(
+      new Error('Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests')
+    );
+
+    setAiClientForTesting({
+      models: {
+        generateContent: mockGenerateContent,
+      },
+    });
+
+    const req: CelebrationIntelligenceRequest = {
+      eventId: mockBaselineEvent.id,
+      newGuestCount: 450,
+      newBudget: 1500000,
+    };
+
+    const report = await handleCelebrationIntelligence(mockBaselineEvent, req);
+    expect(report).toBeDefined();
+    expect(report.aiNarrativeSummary).toBeDefined();
+    expect(report.aiNarrativeSummary?.executiveBriefing).toBeDefined();
+  });
 });

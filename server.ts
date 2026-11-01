@@ -23,6 +23,7 @@ import {
   OperationsRequestSchema,
   getGeminiModelName,
   getGeminiFallbackModelName,
+  getQuotaCircuitBreakerStatus,
 } from './server/geminiService';
 import { generateDynamicReplanning } from './src/domain/replanningEngine';
 
@@ -107,6 +108,7 @@ app.get('/api/health', (req: Request, res: Response) => {
     geminiModel: getGeminiModelName(),
     geminiFallbackModel: getGeminiFallbackModelName(),
     apiKeyConfigured,
+    geminiQuotaCircuitBreaker: getQuotaCircuitBreakerStatus(),
     serverTime: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
   });

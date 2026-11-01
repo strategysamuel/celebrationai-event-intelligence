@@ -100,6 +100,73 @@ export async function executeGeminiWithTimeout(params: any): Promise<any> {
   }
 }
 
+// Server-side Gemini Quota Circuit Breaker State & Utilities
+let quotaCircuitBreakerState = {
+  isDailyQuotaExhausted: false,
+  quotaExhaustedAt: 0,
+  retryUntil: 0,
+  lastQuotaErrorMessage: '',
+};
+
+export function getQuotaCircuitBreakerStatus() {
+  const now = Date.now();
+  if (quotaCircuitBreakerState.isDailyQuotaExhausted && now >= quotaCircuitBreakerState.retryUntil) {
+    quotaCircuitBreakerState = {
+      isDailyQuotaExhausted: false,
+      quotaExhaustedAt: 0,
+      retryUntil: 0,
+      lastQuotaErrorMessage: '',
+    };
+  }
+  return {
+    isOpen: quotaCircuitBreakerState.isDailyQuotaExhausted,
+    retryAfterMs: Math.max(0, quotaCircuitBreakerState.retryUntil - now),
+    quotaExhaustedAt: quotaCircuitBreakerState.quotaExhaustedAt ? new Date(quotaCircuitBreakerState.quotaExhaustedAt).toISOString() : null,
+  };
+}
+
+export function resetQuotaCircuitBreakerForTesting() {
+  quotaCircuitBreakerState = {
+    isDailyQuotaExhausted: false,
+    quotaExhaustedAt: 0,
+    retryUntil: 0,
+    lastQuotaErrorMessage: '',
+  };
+}
+
+function checkAndRecordDailyQuotaExhaustion(error: any) {
+  const msg = (error?.message || String(error)).toLowerCase();
+  const status = (error?.status || '').toLowerCase();
+  const code = error?.code;
+
+  const is429 = code === 429 || status.includes('resource_exhausted') || msg.includes('429') || msg.includes('resource_exhausted') || msg.includes('quota exceeded');
+  const isDailyQuota = is429 || msg.includes('per day limit exceeded') || msg.includes('free tier') || msg.includes('generativelanguage.googleapis.com/generate_content_free_tier_requests') || msg.includes('limit: 20');
+
+  if (isDailyQuota) {
+    const now = Date.now();
+    let retryDelayMs = 60 * 60 * 1000; // default 1 hour cooldown
+    const retryMatch = msg.match(/retryDelay["']?\s*:\s*["']?(\d+)s["']?/i) || msg.match(/please retry in\s+(\d+)h/i);
+    if (retryMatch && retryMatch[1]) {
+      if (msg.match(/retryDelay/i)) {
+        retryDelayMs = parseInt(retryMatch[1], 10) * 1000;
+      } else {
+        retryDelayMs = parseInt(retryMatch[1], 10) * 3600 * 1000;
+      }
+    }
+
+    quotaCircuitBreakerState = {
+      isDailyQuotaExhausted: true,
+      quotaExhaustedAt: now,
+      retryUntil: now + retryDelayMs,
+      lastQuotaErrorMessage: 'Daily free-tier request limit exceeded. Circuit breaker open.',
+    };
+
+    console.warn(
+      `[Gemini Circuit Breaker] Daily quota exhaustion detected (429 RESOURCE_EXHAUSTED). Circuit breaker opened for ${Math.round(retryDelayMs / 1000 / 60)} minutes. Routing subsequent requests to heuristic fallback without upstream calls.`
+    );
+  }
+}
+
 export interface ModelRoutingResult {
   rawResponse: any;
   text: string;
@@ -113,7 +180,7 @@ export interface ModelRoutingResult {
 
 /**
  * Execute Gemini with dynamic model routing, upstream version inspection,
- * and optional explicit alternate-model fallback before falling back to heuristics.
+ * circuit-breaker guard, and optional explicit alternate-model fallback before falling back to heuristics.
  */
 export async function executeGeminiWithRouting(
   params: {
@@ -123,8 +190,16 @@ export async function executeGeminiWithRouting(
   customPrimaryModel?: string,
   customFallbackModel?: string
 ): Promise<ModelRoutingResult> {
-  const primaryModel = customPrimaryModel || getGeminiModelName();
-  const fallbackModel = customFallbackModel || getGeminiFallbackModelName();
+  const breakerStatus = getQuotaCircuitBreakerStatus();
+  if (breakerStatus.isOpen) {
+    console.warn(
+      `[Gemini Circuit Breaker] Circuit breaker is active due to daily quota exhaustion. Bypassing Gemini API and routing to heuristic fallback.`
+    );
+    throw new Error('GEMINI_QUOTA_CIRCUIT_BREAKER_OPEN');
+  }
+
+  const primaryModel = (typeof customPrimaryModel === 'string' && customPrimaryModel.trim() ? customPrimaryModel : getGeminiModelName()) || 'gemini-3.8-flash';
+  const fallbackModel = (typeof customFallbackModel === 'string' && customFallbackModel.trim() ? customFallbackModel : getGeminiFallbackModelName()) || 'gemini-2.5-flash';
 
   try {
     const response = await executeGeminiWithTimeout({
@@ -140,8 +215,8 @@ export async function executeGeminiWithRouting(
 
     if (modelVersion) {
       actualModel = modelVersion;
-      const normRequested = primaryModel.trim().toLowerCase();
-      const normVersion = modelVersion.toLowerCase();
+      const normRequested = String(primaryModel || '').trim().toLowerCase();
+      const normVersion = String(modelVersion || '').toLowerCase();
       if (normVersion !== normRequested) {
         fallbackType = 'upstream_model_difference';
       } else {
@@ -167,12 +242,17 @@ export async function executeGeminiWithRouting(
       source: 'gemini',
     };
   } catch (primaryError: any) {
+    checkAndRecordDailyQuotaExhaustion(primaryError);
+
     console.warn(
-      `Primary Gemini model (${primaryModel}) failed: ${primaryError.message}. Attempting alternate fallback model (${fallbackModel})...`
+      `Primary Gemini model (${primaryModel}) failed: ${primaryError?.message || primaryError}. Attempting alternate fallback model (${fallbackModel})...`
     );
 
+    const primaryStr = String(primaryModel || '').trim().toLowerCase();
+    const fallbackStr = String(fallbackModel || '').trim().toLowerCase();
+
     // If an alternate fallback model is defined and differs from primary, attempt it
-    if (fallbackModel && fallbackModel.trim().toLowerCase() !== primaryModel.trim().toLowerCase()) {
+    if (fallbackStr && fallbackStr !== primaryStr) {
       try {
         const fallbackResponse = await executeGeminiWithTimeout({
           model: fallbackModel,
@@ -198,6 +278,7 @@ export async function executeGeminiWithRouting(
           source: 'gemini',
         };
       } catch (fallbackError: any) {
+        checkAndRecordDailyQuotaExhaustion(fallbackError);
         console.warn(
           `Alternate fallback model (${fallbackModel}) also failed: ${fallbackError.message}`
         );
@@ -932,9 +1013,9 @@ Return strictly JSON:
     const parsed = JSON.parse(routingResult.text || '{}');
     if (parsed.executiveBriefing) {
       report.aiNarrativeSummary = {
-        executiveBriefing: parsed.executiveBriefing,
-        operationalTradeoffs: parsed.operationalTradeoffs || report.aiNarrativeSummary?.operationalTradeoffs || '',
-        strategicRecommendation: parsed.strategicRecommendation || report.aiNarrativeSummary?.strategicRecommendation || '',
+        executiveBriefing: typeof parsed.executiveBriefing === 'string' ? parsed.executiveBriefing : String(parsed.executiveBriefing || ''),
+        operationalTradeoffs: typeof parsed.operationalTradeoffs === 'string' ? parsed.operationalTradeoffs : (parsed.operationalTradeoffs ? String(parsed.operationalTradeoffs) : (report.aiNarrativeSummary?.operationalTradeoffs || '')),
+        strategicRecommendation: typeof parsed.strategicRecommendation === 'string' ? parsed.strategicRecommendation : (parsed.strategicRecommendation ? String(parsed.strategicRecommendation) : (report.aiNarrativeSummary?.strategicRecommendation || '')),
       };
     }
 
@@ -949,7 +1030,8 @@ Return strictly JSON:
 
     return report;
   } catch (err: any) {
-    console.warn('Gemini narrative briefing enrichment failed, using deterministic narrative:', err.message);
+    const errMessage = String(err?.message || err || 'Unknown error');
+    console.warn('Gemini narrative briefing enrichment failed, using deterministic narrative:', errMessage);
     return report;
   }
 }
