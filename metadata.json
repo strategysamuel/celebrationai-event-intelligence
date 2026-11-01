@@ -1,0 +1,8 @@
+{
+  "name": "CelebrationAI – Event Intelligence Copilot",
+  "description": "Plan Smarter. Optimize Better. Celebrate Without Stress. Competition-ready AI-powered event planning copilot with dynamic replanning, smart budget intelligence, vendor scoring, and risk analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
