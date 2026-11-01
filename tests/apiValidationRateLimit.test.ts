@@ -1,16 +1,18 @@
 /**
- * Unit tests for API Zod Schemas (Replanning, Risk Mitigation, Vendor Negotiation, Operations)
+ * Unit tests for API Zod Schemas & Rate Limiter validation
  */
 
 import { describe, it, expect } from 'vitest';
 import {
+  ChatRequestSchema,
+  GeneratePlanRequestSchema,
   ReplanningRequestSchema,
   RiskMitigationRequestSchema,
   VendorNegotiationRequestSchema,
   OperationsRequestSchema,
 } from '../server/geminiService';
 
-describe('API Zod Validation Regression Tests', () => {
+describe('API Zod Validation & Rate Limit Regression Tests', () => {
   it('validates ReplanningRequestSchema correctly', () => {
     const valid = {
       currentPlan: { id: 'evt-1', name: 'Wedding', totalBudget: 1500000, guestCount: 300 },
@@ -20,9 +22,20 @@ describe('API Zod Validation Regression Tests', () => {
     expect(res.success).toBe(true);
   });
 
-  it('rejects invalid ReplanningRequestSchema without currentPlan or request', () => {
-    const invalid = { currentPlan: { id: 'evt-1' } };
-    const res = ReplanningRequestSchema.safeParse(invalid);
+  it('rejects malformed / oversized ReplanningRequestSchema values', () => {
+    const malformed = {
+      currentPlan: { id: 'evt-1', name: 'Wedding', totalBudget: -500, guestCount: 9999999 },
+      request: { newBudget: -100 },
+    };
+    const res = ReplanningRequestSchema.safeParse(malformed);
+    expect(res.success).toBe(false);
+  });
+
+  it('rejects oversized prompt in GeneratePlanRequestSchema', () => {
+    const oversized = {
+      prompt: 'A'.repeat(5000), // exceeds max 4000
+    };
+    const res = GeneratePlanRequestSchema.safeParse(oversized);
     expect(res.success).toBe(false);
   });
 

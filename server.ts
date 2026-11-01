@@ -35,11 +35,18 @@ const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const isProduction = process.env.NODE_ENV === 'production';
 
+// Trust proxy for correct client IP detection behind Cloud Run / load balancers
+app.set('trust proxy', true);
+
 // Security and request size limit
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
-// Bounded, expiring in-memory rate limiter for /api/* endpoints
+/**
+ * Bounded, expiring in-memory rate limiter for /api/* endpoints.
+ * Note: In-memory rate limiting operates independently per Cloud Run server instance 
+ * and is not globally shared across distributed instances.
+ */
 const rateLimitWindowMs = 60 * 1000; // 1 minute
 const maxRequestsPerWindow = 60;
 const maxTrackedIps = 10000;
@@ -72,6 +79,14 @@ app.use('/api', (req, res, next) => {
     return res.status(429).json({
       error: 'Too many requests. Please wait a moment before sending more AI planning queries.',
     });
+  }
+
+  // Enforce immediate map capacity bounds upon new IP insertion
+  if (!ipRequestHistory.has(ip) && ipRequestHistory.size >= maxTrackedIps) {
+    const firstKey = ipRequestHistory.keys().next().value;
+    if (firstKey !== undefined) {
+      ipRequestHistory.delete(firstKey);
+    }
   }
 
   recent.push(now);

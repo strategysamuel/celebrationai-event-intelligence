@@ -214,73 +214,63 @@ export const ChatRequestSchema = z.object({
   messages: z.array(
     z.object({
       role: z.enum(['user', 'assistant', 'system']),
-      content: z.string().max(4000),
+      content: z.string().min(1).max(4000),
     })
-  ).max(30),
-  currentEvent: z.any().optional(),
+  ).min(1).max(50),
+  currentEvent: z.object({
+    id: z.string().optional(),
+    name: z.string().max(200).optional(),
+    totalBudget: z.number().min(0).max(1000000000).optional(),
+    guestCount: z.number().int().min(0).max(100000).optional(),
+  }).passthrough().optional(),
 });
 
 export const GeneratePlanRequestSchema = z.object({
   prompt: z.string().min(5).max(4000),
-  eventType: z.string().optional(),
-  targetDate: z.string().optional(),
-  guestCount: z.number().optional(),
-  budget: z.number().optional(),
-  currency: z.string().optional(),
+  eventType: z.string().max(100).optional(),
+  targetDate: z.string().max(50).optional(),
+  guestCount: z.number().int().min(1).max(100000).optional(),
+  budget: z.number().min(0).max(1000000000).optional(),
+  currency: z.string().max(10).optional(),
 });
 
 export const CelebrationIntelligenceRequestSchema = z.object({
   currentPlan: z.any(),
   request: z.object({
-    eventId: z.string(),
-    newGuestCount: z.number().optional(),
-    newBudget: z.number().optional(),
-    newEventDate: z.string().optional(),
-    preservedPriorities: z.array(z.string()).optional(),
+    eventId: z.string().min(1),
+    newGuestCount: z.number().int().min(1).max(100000).optional(),
+    newBudget: z.number().min(0).max(1000000000).optional(),
+    newEventDate: z.string().max(50).optional(),
+    preservedPriorities: z.array(z.string().max(200)).max(20).optional(),
   }),
 });
 
 export const ReplanningRequestSchema = z.object({
-  currentPlan: z.object({
-    id: z.string(),
-    name: z.string(),
-    totalBudget: z.number(),
-    guestCount: z.number(),
-  }).passthrough(),
+  currentPlan: z.any(),
   request: z.object({
-    newBudget: z.number().optional(),
-    newDate: z.string().optional(),
-    newGuestCount: z.number().optional(),
+    newBudget: z.number().min(0).max(1000000000).optional(),
+    newDate: z.string().max(50).optional(),
+    newGuestCount: z.number().int().min(1).max(100000).optional(),
   }).passthrough(),
 });
 
 export const RiskMitigationRequestSchema = z.object({
-  risk: z.object({
-    id: z.string(),
-    title: z.string(),
-    severity: z.string(),
-  }).passthrough(),
+  risk: z.any(),
   planContext: z.object({
-    name: z.string(),
-    type: z.string(),
-    budget: z.number(),
-    currency: z.string(),
+    name: z.string().max(200),
+    type: z.string().max(100),
+    budget: z.number().min(0).max(1000000000),
+    currency: z.string().max(10),
   }).optional(),
 });
 
 export const VendorNegotiationRequestSchema = z.object({
-  quotation: z.object({
-    vendorName: z.string(),
-    quotedAmount: z.number().optional(),
-  }).passthrough(),
-  allocatedBudget: z.number().optional(),
+  quotation: z.any(),
+  allocatedBudget: z.number().min(0).max(1000000000).optional(),
 });
 
 export const OperationsRequestSchema = z.object({
-  event: z.object({
-    id: z.string(),
-    name: z.string(),
-  }).passthrough(),
+  event: z.any(),
 });
 
 // System Instructions

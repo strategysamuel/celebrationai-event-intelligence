@@ -4,7 +4,7 @@
 > **Competition Vertical:** Celebration & Event Planner (PROMPTWARS 2026)  
 > **Current Release:** CAI-006.1 Final Competition Release  
 > **Target Repository:** celebrationai-event-intelligence  
-> **Automated Tests:** 105 Passed across 12 Test Suites (100% Pass Rate)
+> **Automated Tests:** 113 Passed across 14 Test Suites (100% Pass Rate)
 
 ---
 
@@ -218,9 +218,9 @@ npm run build
 
 ### Verified Test Results (CAI-006.1 Baseline)
 
-- **Total Test Suites:** 12 Passed (12 total)
-- **Total Tests:** 105 Passed (105 total)
-- **Execution Time:** ~7.00 seconds
+- **Total Test Suites:** 14 Passed (14 total)
+- **Total Tests:** 113 Passed (113 total)
+- **Execution Time:** ~7.50 seconds
 - **Pass Rate:** 100.0%
 
 #### Test Suite Breakdown
@@ -239,6 +239,8 @@ npm run build
 | **Event Store** | `tests/eventStore.test.ts` | 7 / 7 | Event CRUD, active event immutability, backup export |
 | **Timeline Engine** | `tests/timelineEngine.test.ts` | 8 / 8 | Backward scheduling, date validation, critical path |
 | **Vendor Engine** | `tests/vendorEngine.test.ts` | 3 / 3 | 35/30/20/15 suitability scoring formula |
+| **Accessible Modal** | `tests/accessibleModal.test.ts` | 3 / 3 | Modal focus management, typing focus retention, Escape key |
+| **API Validation & Rate Limit** | `tests/apiValidationRateLimit.test.ts` | 5 / 5 | Zod schema bounds, malformed payloads, rate limiter |
 
 ---
 
